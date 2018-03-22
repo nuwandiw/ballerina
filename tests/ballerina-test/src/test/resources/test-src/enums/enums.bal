@@ -53,17 +53,25 @@ function testEnumInAnotherPackage() returns (int) {
     }
 
     return 200;
-    
+
 }
 
 function testEnumToAnyCast() returns (int) {
     state st = state.INSTALLED;
     state st1 = state.ACTIVE;
     any a = st;
-    any b = (any)st1;
+    any b = <any>st1;
 
-    var ast, _ = (state) a;
-    var ast1, _ = (state) b;
+    state ast;
+    match <state> a{
+        state st11 => ast =st11;
+        error err1 => return err1;
+    }
+    state ast1;
+    match <state> b{
+        state st22 => ast1 =st22;
+        error err2 => return err2;
+    }
 
     if ( ast == ast1) {
         return 404;
@@ -74,7 +82,7 @@ function testEnumToAnyCast() returns (int) {
 
 function testEnumSameTypeCast() returns (int) {
     state st = state.INSTALLED;
-    state st1 = (state)st;
+    state st1 = <state>st;
 
 
     if ( st == st1) {
