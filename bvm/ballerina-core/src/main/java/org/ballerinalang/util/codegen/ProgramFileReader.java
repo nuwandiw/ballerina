@@ -30,6 +30,7 @@ import org.ballerinalang.model.types.BStructType;
 import org.ballerinalang.model.types.BTableType;
 import org.ballerinalang.model.types.BType;
 import org.ballerinalang.model.types.BTypes;
+import org.ballerinalang.model.types.BUnionType;
 import org.ballerinalang.model.types.TypeSignature;
 import org.ballerinalang.model.types.TypeTags;
 import org.ballerinalang.model.util.Flags;
@@ -885,7 +886,7 @@ public class ProgramFileReader {
             case 'E':
             case 'D':
             case 'H':
-            case 'M':
+            case 'Z':
                 char typeChar = chars[index];
                 // TODO Improve this logic
                 index++;
@@ -945,7 +946,7 @@ public class ProgramFileReader {
                 BArrayType arrayType = new BArrayType(elemType);
                 typeStack.push(arrayType);
                 return index;
-            case 'N':
+            case 'M':
                 index = createBTypeFromSig(chars, index + 1, typeStack, packageInfo);
                 BType constrainedType = typeStack.pop();
                 BType mapType;
@@ -959,6 +960,24 @@ public class ProgramFileReader {
             case 'U':
                 // TODO : Fix this for type casting.
                 typeStack.push(new BFunctionType());
+                return index + 1;
+            case 'O':
+                index++;
+                nameIndex = index;
+                while (chars[nameIndex] != ';') {
+                    nameIndex++;
+                }
+                List<BType> memberTypes = new ArrayList<>();
+                int memberCount = Integer.parseInt(new String(Arrays.copyOfRange(chars, index, nameIndex)));
+                index = nameIndex;
+                for (int i = 0; i < memberCount; i++) {
+                    index = createBTypeFromSig(chars, index + 1, typeStack, packageInfo) - 1;
+                    memberTypes.add(typeStack.pop());
+                }
+                typeStack.push(new BUnionType(memberTypes));
+                return index + 1;
+            case 'N':
+                typeStack.push(BTypes.typeNull);
                 return index + 1;
             default:
                 throw new ProgramFileFormatException("unsupported base type char: " + ch);
@@ -984,7 +1003,7 @@ public class ProgramFileReader {
                 return BTypes.typeAny;
             case 'R':
                 return BTypes.getTypeFromName(desc.substring(1, desc.length() - 1));
-            case 'N':
+            case 'M':
                 BType constrainedType = getBTypeFromDescriptor(desc.substring(1));
                 if (constrainedType == BTypes.typeAny) {
                     return BTypes.typeMap;
@@ -997,7 +1016,7 @@ public class ProgramFileReader {
             case 'T':
             case 'E':
             case 'H':
-            case 'M':
+            case 'Z':
             case 'D':
                 String typeName = desc.substring(1, desc.length() - 1);
                 String[] parts = typeName.split(":");
@@ -1036,6 +1055,12 @@ public class ProgramFileReader {
             case 'U':
                 // TODO : Fix this for type casting.
                 return new BFunctionType();
+            case 'O':
+                Stack<BType> typeStack = new Stack<BType>();
+                createBTypeFromSig(desc.toCharArray(), 0, typeStack, null);
+                return typeStack.pop();
+            case 'N':
+                return BTypes.typeNull;
             default:
                 throw new ProgramFileFormatException("unsupported base type char: " + ch);
         }
@@ -1303,7 +1328,7 @@ public class ProgramFileReader {
             int i, j, k, h;
             int funcRefCPIndex;
             FunctionRefCPEntry funcRefCPEntry;
-            boolean async;
+            int flags;
             int[] argRegs;
             int[] retRegs;
 
@@ -1445,6 +1470,7 @@ public class ProgramFileReader {
                 case InstructionCodes.S2JSONX:
                 case InstructionCodes.NULL2S:
                 case InstructionCodes.AWAIT:
+                case InstructionCodes.CHECK_CONVERSION:
                     i = codeStream.readInt();
                     j = codeStream.readInt();
                     packageInfo.addInstruction(InstructionFactory.get(opcode, i, j));
@@ -1527,6 +1553,7 @@ public class ProgramFileReader {
                 case InstructionCodes.ANY2T:
                 case InstructionCodes.ANY2C:
                 case InstructionCodes.ANY2E:
+                case InstructionCodes.IS_ASSIGNABLE:
                 case InstructionCodes.TR_RETRY:
                     i = codeStream.readInt();
                     j = codeStream.readInt();
@@ -1545,44 +1572,44 @@ public class ProgramFileReader {
 
                 case InstructionCodes.CALL:
                     funcRefCPIndex = codeStream.readInt();
-                    async = this.readBoolean(codeStream);
+                    flags = codeStream.readInt();
                     funcRefCPEntry = (FunctionRefCPEntry) packageInfo.getCPEntry(funcRefCPIndex);
                     packageInfo.addInstruction(new InstructionCALL(opcode, funcRefCPIndex,
-                            funcRefCPEntry.getFunctionInfo(), async, getArgRegs(codeStream), getArgRegs(codeStream)));
+                            funcRefCPEntry.getFunctionInfo(), flags, getArgRegs(codeStream), getArgRegs(codeStream)));
                     break;
                 case InstructionCodes.VCALL:
                     int receiverRegIndex = codeStream.readInt();
                     funcRefCPIndex = codeStream.readInt();
-                    async = this.readBoolean(codeStream);
+                    flags = codeStream.readInt();
                     funcRefCPEntry = (FunctionRefCPEntry) packageInfo.getCPEntry(funcRefCPIndex);
                     packageInfo.addInstruction(new InstructionVCALL(opcode, receiverRegIndex, funcRefCPIndex,
-                            funcRefCPEntry.getFunctionInfo(), async, getArgRegs(codeStream), getArgRegs(codeStream)));
+                            funcRefCPEntry.getFunctionInfo(), flags, getArgRegs(codeStream), getArgRegs(codeStream)));
                     break;
                 case InstructionCodes.ACALL:
                     int actionRefCPIndex = codeStream.readInt();
-                    async = this.readBoolean(codeStream);
+                    flags = codeStream.readInt();
                     ActionRefCPEntry actionRefCPEntry = (ActionRefCPEntry) packageInfo.getCPEntry(actionRefCPIndex);
                     packageInfo.addInstruction(new InstructionACALL(opcode, actionRefCPIndex,
-                            actionRefCPEntry.getActionName(), async, getArgRegs(codeStream), getArgRegs(codeStream)));
+                            actionRefCPEntry.getActionName(), flags, getArgRegs(codeStream), getArgRegs(codeStream)));
                     break;
                 case InstructionCodes.FPCALL:
                     funcRefCPIndex = codeStream.readInt();
-                    async = this.readBoolean(codeStream);
+                    flags = codeStream.readInt();
                     argRegs = getArgRegs(codeStream);
                     retRegs = getArgRegs(codeStream);
 
-                    FunctionCallCPEntry funcCallCPEntry = new FunctionCallCPEntry(async, argRegs, retRegs);
+                    FunctionCallCPEntry funcCallCPEntry = new FunctionCallCPEntry(flags, argRegs, retRegs);
                     int funcCallCPIndex = packageInfo.addCPEntry(funcCallCPEntry);
 
                     packageInfo.addInstruction(InstructionFactory.get(opcode, funcRefCPIndex, funcCallCPIndex));
                     break;
                 case InstructionCodes.TCALL:
                     int transformCPIndex = codeStream.readInt();
-                    async = this.readBoolean(codeStream);
+                    flags = codeStream.readInt();
                     TransformerRefCPEntry transformerRefCPEntry =
                             (TransformerRefCPEntry) packageInfo.getCPEntry(transformCPIndex);
                     packageInfo.addInstruction(new InstructionTCALL(opcode, transformCPIndex,
-                            transformerRefCPEntry.getTransformerInfo(), async,
+                            transformerRefCPEntry.getTransformerInfo(), flags,
                             getArgRegs(codeStream), getArgRegs(codeStream)));
                     break;
                 case InstructionCodes.WRKSEND:

@@ -95,13 +95,13 @@ function loadToTable (string filePath) returns (float|io:IOError) {
     float total;
     var result = io:loadToTable(filePath, "\n", ",", "UTF-8", false, typeof Employee);
     match result {
-        table <Employee> tb =>{
+        table<Employee> tb => {
             foreach x in tb {
                 total = total + x.salary;
             }
             return total;
         }
-        io:IOError err =>{
+        io:IOError err => {
             return err;
         }
     }
